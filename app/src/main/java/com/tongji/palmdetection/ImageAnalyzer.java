@@ -2,11 +2,15 @@ package com.tongji.palmdetection;
 
 import android.content.Context;
 import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.graphics.Canvas;
 import android.graphics.Color;
+import android.graphics.ImageFormat;
 import android.graphics.Matrix;
 import android.graphics.Paint;
+import android.graphics.Rect;
 import android.graphics.RectF;
+import android.graphics.YuvImage;
 import android.util.Log;
 import android.widget.ImageView;
 
@@ -15,12 +19,15 @@ import androidx.camera.core.ImageAnalysis;
 import androidx.camera.core.ImageProxy;
 import androidx.camera.view.PreviewView;
 
+import java.io.ByteArrayOutputStream;
+import java.nio.ByteBuffer;
+
 import io.reactivex.rxjava3.android.schedulers.AndroidSchedulers;
 import io.reactivex.rxjava3.core.Observable;
 import io.reactivex.rxjava3.core.ObservableEmitter;
 import io.reactivex.rxjava3.schedulers.Schedulers;
 
-public class ImageAnalyse implements ImageAnalysis.Analyzer {
+public class ImageAnalyzer implements ImageAnalysis.Analyzer {
 
     public static class Result{
 
@@ -36,22 +43,39 @@ public class ImageAnalyse implements ImageAnalysis.Analyzer {
     private final PreviewView previewView;
     private final ImageProcess imageProcess;
     private final YoloV5Ncnn yolov5Detector;
-    private final int rotation;
+    private Matrix fullScreenTransform = null;
 
-    public ImageAnalyse(
+    public ImageAnalyzer(
             Context context,
             PreviewView previewView,
             ImageView boxLabelCanvas,
-            int rotation,
             YoloV5Ncnn yolov5Detector
     ) {
 
         this.previewView = previewView;
         this.boxLabelCanvas = boxLabelCanvas;
         this.yolov5Detector = yolov5Detector;
-        this.rotation = rotation;
         this.imageProcess = new ImageProcess();
 
+    }
+
+    private Bitmap convertImageProxyToBitmap(ImageProxy image) {
+        ByteBuffer yBuffer = image.getPlanes()[0].getBuffer();
+        ByteBuffer vuBuffer = image.getPlanes()[2].getBuffer();
+
+        int ySize = yBuffer.remaining();
+        int vuSize = vuBuffer.remaining();
+
+        byte[] nv21 = new byte[ySize + vuSize];
+
+        yBuffer.get(nv21, 0, ySize);
+        vuBuffer.get(nv21, ySize, vuSize);
+
+        YuvImage yuvImage = new YuvImage(nv21, ImageFormat.NV21, image.getWidth(), image.getHeight(), null);
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        yuvImage.compressToJpeg(new Rect(0, 0, yuvImage.getWidth(), yuvImage.getHeight()), 50, out);
+        byte[] imageBytes = out.toByteArray();
+        return BitmapFactory.decodeByteArray(imageBytes, 0, imageBytes.length);
     }
 
     @Override
@@ -60,51 +84,31 @@ public class ImageAnalyse implements ImageAnalysis.Analyzer {
         int previewHeight = previewView.getHeight();
         int previewWidth = previewView.getWidth();
 
+        int imageHeight = image.getHeight();
+        int imageWidth = image.getWidth();
+
+        // 图片适应屏幕fill_start格式的bitmap
+        if (fullScreenTransform == null) {
+            fullScreenTransform = imageProcess.getTransformationMatrix(
+                    imageWidth, imageHeight,
+                    imageWidth, previewHeight,
+                    90, false
+            );
+        }
+
         Observable.create( (ObservableEmitter<Result> emitter) -> {
 
             long startTime = System.currentTimeMillis();
 
-            byte[][] yuvBytes = new byte[3][];
-            ImageProxy.PlaneProxy[] planes = image.getPlanes();
-            int imageHeight = image.getHeight();
-            int imageWidth = image.getWidth();
-
-            imageProcess.fillBytes(planes, yuvBytes);
-            int yRowStride = planes[0].getRowStride();
-            final int uvRowStride = planes[1].getRowStride();
-            final int uvPixelStride = planes[1].getPixelStride();
-
-            int[] rgbBytes = new int[imageHeight * imageWidth];
-            imageProcess.YUV420ToARGB8888(
-                    yuvBytes[0], yuvBytes[1], yuvBytes[2],
-                    imageWidth, imageHeight,
-                    yRowStride,
-                    uvRowStride, uvPixelStride,
-                    rgbBytes
-            );
-
-            // 原图bitmap
-            Bitmap imageBitmap = Bitmap.createBitmap(imageWidth, imageHeight, Bitmap.Config.ARGB_8888);
-            imageBitmap.setPixels(rgbBytes, 0, imageWidth, 0, 0, imageWidth, imageHeight);
-
-            // 图片适应屏幕fill_start格式的bitmap
-            double scale = Math.max(
-                    previewHeight / (double) (rotation % 180 == 0 ? imageWidth : imageHeight),
-                    previewWidth / (double) (rotation % 180 == 0 ? imageHeight : imageWidth)
-            );
-            Matrix fullScreenTransform = imageProcess.getTransformationMatrix(
-                    imageWidth, imageHeight,
-                    (int) (scale * imageHeight), (int) (scale * imageWidth),
-                    rotation % 180 == 0 ? 90 : 0, false
-            );
-
-            // 适应preview的全尺寸bitmap
+            // bitmap
+            Bitmap imageBitmap = convertImageProxyToBitmap(image);
             Bitmap fullImageBitmap = Bitmap.createBitmap(imageBitmap, 0, 0, imageWidth, imageHeight, fullScreenTransform, false);
-            // 裁剪出跟preview在屏幕上一样大小的bitmap
-            Bitmap cropImageBitmap = Bitmap.createBitmap(fullImageBitmap, 0, 0, previewWidth, previewHeight);
+
+
+            Log.i("fullImageBitmap", fullImageBitmap.getWidth() + "  " + fullImageBitmap.getHeight());
 
             // 调用yolov5预测接口
-            YoloV5Ncnn.Obj[] objects = yolov5Detector.detect(cropImageBitmap, true);
+            YoloV5Ncnn.Obj[] objects = yolov5Detector.detect(fullImageBitmap, true);
 
             // 画出预测结果
             Bitmap resultBitmap = drawObjects(objects);
