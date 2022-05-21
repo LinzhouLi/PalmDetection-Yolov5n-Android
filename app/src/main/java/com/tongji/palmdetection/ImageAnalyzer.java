@@ -13,6 +13,7 @@ import android.graphics.RectF;
 import android.graphics.YuvImage;
 import android.util.Log;
 import android.widget.ImageView;
+import android.widget.TextView;
 
 import androidx.annotation.NonNull;
 import androidx.camera.core.ImageAnalysis;
@@ -39,6 +40,7 @@ public class ImageAnalyzer implements ImageAnalysis.Analyzer {
         Bitmap bitmap;
     }
 
+    private final TextView costTimeText;
     private final ImageView boxLabelCanvas;
     private final PreviewView previewView;
     private final ImageProcess imageProcess;
@@ -48,12 +50,14 @@ public class ImageAnalyzer implements ImageAnalysis.Analyzer {
     public ImageAnalyzer(
             Context context,
             PreviewView previewView,
+            TextView costTimeText,
             ImageView boxLabelCanvas,
             YoloV5Ncnn yolov5Detector
     ) {
 
         this.previewView = previewView;
         this.boxLabelCanvas = boxLabelCanvas;
+        this.costTimeText = costTimeText;
         this.yolov5Detector = yolov5Detector;
         this.imageProcess = new ImageProcess();
 
@@ -122,7 +126,8 @@ public class ImageAnalyzer implements ImageAnalysis.Analyzer {
           .observeOn(AndroidSchedulers.mainThread())
           .subscribe( (Result result) -> {
               boxLabelCanvas.setImageBitmap(result.bitmap);
-              Log.i("image", Long.toString(result.costTime) + "ms");
+              costTimeText.setText(Long.toString(result.costTime) + "ms");
+//              Log.i("image", Long.toString(result.costTime) + "ms");
           });
 
     }
