@@ -73,8 +73,19 @@ public class CameraProcess {
                     e.printStackTrace();
                 }
             }
+
         }, ContextCompat.getMainExecutor(context));
 
     }
+
+//    public void shutDownCamera() {
+//        try {
+//            cameraProviderFuture.get().shutdown();
+//        } catch (ExecutionException e) {
+//            e.printStackTrace();
+//        } catch (InterruptedException e) {
+//            e.printStackTrace();
+//        }
+//    }
 
 }
